@@ -1,0 +1,4 @@
+ultralytics>=8.4      # YOLO26 + YOLOE + ByteTrack (pulls in torch, opencv, numpy)
+lap>=0.5.12           # ByteTrack's assignment solver
+imageio-ffmpeg        # bundled ffmpeg: re-encodes output video to browser-playable H.264
+clip @ git+https://github.com/ultralytics/CLIP.git   # only for auto_label.py (YOLOE text prompts)

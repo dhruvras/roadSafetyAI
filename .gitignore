@@ -1,0 +1,16 @@
+# environment
+.venv/
+__pycache__/
+.DS_Store
+
+# large or private: videos, datasets, model weights, generated results
+data/
+*.pt
+!models/helmet_v1.pt
+*.ts
+weights/
+runs/
+outputs/
+
+# college paperwork (synopsis etc.)
+docs/
