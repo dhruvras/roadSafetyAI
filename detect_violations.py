@@ -15,14 +15,14 @@ import cv2
 import imageio_ffmpeg
 from ultralytics import YOLO
 
-from common import BIKE_MODEL, HEAD_MODEL, MOTORCYCLE, VEHICLES, heads_from, pick_device, rider_region
+from common import (BIKE_MODEL, HEAD_MODEL, MOTORCYCLE, VEHICLES, add_yoloe_helmets, claim_heads, heads_from, load_yoloe, pick_device,
+                    rider_region)
 
 BIKE_CONF, HEAD_CONF = 0.35, 0.40
 NH_CONF = 0.50             # a bare head only counts towards "no helmet" when the model is at least this sure
 STRIDE = 2                 # analyse every 2nd frame: twice as fast, and 12-15 looks per second is plenty
-BETA = 0.10                # a head's centre may stick out up to 10% beyond the bike's sides
 N_MIN = 8                  # only judge a bike after seeing it in 8 analysed frames
-K_TR = 3                   # triple riding: 3+ heads in at least 3 frames
+K_TR, TR_RHO = 3, 0.3      # triple riding: 3+ heads in at least 3 frames and in >= 30% of the frames
 RHO, K_NH = 0.4, 3         # no helmet: in >= 40% of the frames where its heads were visible, and in >= 3 frames
 MIN_MOVE = 0.5             # a bike that never moves half its own width is treated as parked and not judged
 BIKE_SHARE = 0.6           # a track must be called "motorcycle" in >= 60% of its frames (not bicycle/car/truck)
@@ -59,7 +59,7 @@ def decide(s):
     if s["frames"] < N_MIN or not is_motorcycle(s) or not moved(s):
         return set()
     verdict = set()
-    if s["triple_frames"] >= K_TR:
+    if s["triple_frames"] >= K_TR and s["triple_frames"] / s["frames"] >= TR_RHO:
         verdict.add(TRIPLE)
     if s["head_frames"] and s["nohelmet_frames"] >= K_NH and s["nohelmet_frames"] / s["head_frames"] >= RHO:
         verdict.add(NO_HELMET)
@@ -72,7 +72,7 @@ def typical_riders(s):
 
 
 # ---------------------------------------------------------------- one video
-def analyse(video, bike_model, head_model, device, show=True):
+def analyse(video, bike_model, head_model, yoloe, device, show=True, progress=None):
     out_dir = Path("outputs") / video.stem
     (out_dir / "evidence").mkdir(parents=True, exist_ok=True)
     for old in (out_dir / "evidence").glob("*.jpg"):
@@ -80,9 +80,10 @@ def analyse(video, bike_model, head_model, device, show=True):
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         print(f"could not open {video}, skipping")
-        return []
+        return [], 0
     W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
     raw = out_dir / "annotated_raw.mp4"
     writer = cv2.VideoWriter(str(raw), cv2.VideoWriter_fourcc(*"mp4v"), fps / STRIDE, (W, H))
     bike_model.predictor = None               # fresh tracker for every video, so IDs start again at 1
@@ -98,6 +99,8 @@ def analyse(video, bike_model, head_model, device, show=True):
             continue
         analysed += 1
         t = (frame_no - 1) / fps
+        if progress:
+            progress(frame_no / total)         # the dashboard's progress bar
 
         # 1. track every vehicle type, so we can tell when a "motorcycle" is really a bicycle or an e-rickshaw
         r = bike_model.track(frame, persist=True, classes=VEHICLES, conf=BIKE_CONF, device=device,
@@ -118,11 +121,15 @@ def analyse(video, bike_model, head_model, device, show=True):
         regions = [rider_region(box, W, H) for _, box in bikes]
         crops = [frame[y1:y2, x1:x2].copy() for x1, y1, x2, y2 in regions]
         head_results = head_model.predict(crops, conf=HEAD_CONF, device=device, verbose=False) if crops else []
+        helmet_results = yoloe.predict(crops, conf=0.15, device=device, verbose=False) if crops and yoloe else head_results
 
-        for (track_id, bike), (rx, ry, _, _), crop, hr in zip(bikes, regions, crops, head_results):
-            # 3. heads in frame coordinates, only those above this bike
-            margin = BETA * (bike[2] - bike[0])
-            heads = [h for h in heads_from(hr, rx, ry) if bike[0] - margin <= (h[0] + h[2]) / 2 <= bike[2] + margin]
+        # 3. heads in frame coordinates (YOLOE's second opinion applied), each head given to exactly one bike
+        found = [heads_from(hr, rx, ry) for hr, (rx, ry, _, _) in zip(head_results, regions)]
+        if yoloe:
+            found = [add_yoloe_helmets(hs, er, rx, ry) for hs, er, (rx, ry, _, _) in zip(found, helmet_results, regions)]
+        owned = claim_heads([box for _, box in bikes], found)
+
+        for (track_id, bike), (rx, ry, _, _), crop, heads in zip(bikes, regions, crops, owned):
             n = len(heads)
             bare = [h for h in heads if h[4] == 1 and h[5] >= NH_CONF]       # fix 3: only confident bare heads
 
@@ -201,18 +208,20 @@ def analyse(video, bike_model, head_model, device, show=True):
           f"{parked} parked | {len(records)} violations")
     for r in records:
         print(f"   {r['time']}  bike #{r['bike']:<4} {LABELS[r['violation']]:<14} riders: {r['riders']}  conf: {r['confidence']}")
-    return records
+    return records, len(bikes_final)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("videos", nargs="+", type=Path)
     ap.add_argument("--model", default=HEAD_MODEL, help="head model to use (default: %(default)s)")
+    ap.add_argument("--no-yoloe", action="store_true", help="skip YOLOE's second opinion on helmets (faster, less accurate)")
     ap.add_argument("--no-show", action="store_true", help="don't open a preview window")
     args = ap.parse_args()
     device = pick_device()
     bike_model, head_model = YOLO(BIKE_MODEL), YOLO(args.model)
+    yoloe = None if args.no_yoloe else load_yoloe()
     everything = []
     for video in args.videos:
-        everything += analyse(video, bike_model, head_model, device, show=not args.no_show)
+        everything += analyse(video, bike_model, head_model, yoloe, device, show=not args.no_show)[0]
     print(f"\nTOTAL: {len(everything)} violations in {len(args.videos)} video(s)")

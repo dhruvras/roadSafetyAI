@@ -11,26 +11,16 @@ Crops where they agree get labels. Crops with any doubt go to skip.txt (fix them
 from pathlib import Path
 
 import cv2
-from ultralytics import YOLO, YOLOE
+from ultralytics import YOLO
 
-from common import BIKE_MODEL, HEAD_MODEL, heads_from, iou, pick_device
+from common import BIKE_MODEL, HEAD_MODEL, HELMET_CONF, YOLOE_MODEL, heads_from, load_yoloe, overlaps, pick_device
 
 D = Path("data/v2_crops")
-YOLOE_MODEL = "models/yoloe-26s-seg.pt"
-HELMET_CONF = 0.30         # YOLOE helmet boxes we trust
 WEAK_HELMET = 0.15         # YOLOE helmet boxes below HELMET_CONF but above this = doubt
 V1_CONF = 0.30             # v1 head boxes we consider at all
 BARE_CONF = 0.50           # v1 "no_helmet" must be at least this sure (and not contradicted by YOLOE)
 PERSON_CONF = 0.50
 HELMET, NO_HELMET = 0, 1
-
-
-def overlaps(a, b):
-    """Same head? Either box's centre lies inside the other, or they overlap > 30%."""
-    def centre_in(p, q):
-        cx, cy = (p[0] + p[2]) / 2, (p[1] + p[3]) / 2
-        return q[0] <= cx <= q[2] and q[1] <= cy <= q[3]
-    return centre_in(a, b) or centre_in(b, a) or iou(a, b) > 0.3
 
 
 def label_crop(img, yoloe, v1, persons_model, device):
@@ -73,8 +63,7 @@ def label_crop(img, yoloe, v1, persons_model, device):
 
 def main():
     device = pick_device()
-    yoloe = YOLOE(YOLOE_MODEL)
-    yoloe.set_classes(["helmet"], yoloe.get_text_pe(["helmet"]))
+    yoloe = load_yoloe()
     v1, persons_model = YOLO(HEAD_MODEL), YOLO(BIKE_MODEL)
 
     skipped, counts = [], {"helmet": 0, "no_helmet": 0, "empty": 0}

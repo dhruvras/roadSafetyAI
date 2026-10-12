@@ -13,10 +13,11 @@ video ─► YOLO26n (COCO) + ByteTrack ─► every vehicle gets an ID; keep th
            │
            ▼ for each motorcycle: cut out the region above it (its riders)
        head model (ours, fine-tuned YOLO26n) ─► heads, each "helmet" or "no_helmet"
+       YOLOE ("helmet" prompt, zero-shot)     ─► second opinion: dark rear-view helmets our model misses
            │
-           ▼ remember per bike, frame after frame: how many heads, any confident bare head?
+           ▼ every head is given to ONE bike (neighbouring crops overlap), then remember per bike, frame after frame: how many heads, any confident bare head?
        vote once per bike (ignore bikes seen too briefly or parked)
-           ├─ 3+ heads in ≥ 3 frames                         ─► TRIPLE RIDING
+           ├─ 3+ heads in ≥ 3 frames and ≥ 30% of frames     ─► TRIPLE RIDING
            └─ bare head in ≥ 40% of frames (and ≥ 3 frames)  ─► NO HELMET
            │
            ▼
@@ -31,7 +32,7 @@ pip install -r requirements.txt
 ```
 
 Runs on Apple Silicon (MPS), NVIDIA (CUDA) or CPU; the scripts pick automatically.
-`models/yolo26n.pt` downloads itself on first run. The trained head model
+`models/yolo26n.pt` and `models/yoloe-26s-seg.pt` (the helmet second opinion) download themselves on first run. The trained head model
 `models/helmet_v1.pt` (5 MB) is included in the repo. Datasets, videos, other weights and results are
 not in git; you can retrain the model yourself (below).
 
@@ -39,7 +40,8 @@ not in git; you can retrain the model yourself (below).
 
 | Step | Command |
 |---|---|
-| Detect violations in videos | `python detect_violations.py data/clips/*.mp4` (add `--model models/helmet_v2.pt`, `--no-show`) |
+| Dashboard (upload / pick a video, see violations + evidence) | `streamlit run app.py` |
+| Detect violations in videos | `python detect_violations.py data/clips/*.mp4` (add `--model models/helmet_v2.pt`, `--no-show`, `--no-yoloe`) |
 | Build the training set from the Kaggle dataset | `python prepare_dataset.py` (expects `data/kaggle_helmet/{images,annotations}`) |
 | Train a head model | `python train.py data/helmet_v1/data.yaml helmet_v1` |
 | Cut rider crops from your own videos | `python dump_crops.py data/clips/*.mp4` (rebuilds `data/v2_crops/` from scratch) |
@@ -49,8 +51,9 @@ not in git; you can retrain the model yourself (below).
 ## Folder layout
 
 ```
-common.py            shared settings + helpers (device, rider region, IoU, head parsing)
+common.py            shared settings + helpers (device, rider region, IoU, head parsing, YOLOE check)
 detect_violations.py the full pipeline
+app.py               Streamlit dashboard around the pipeline
 prepare_dataset.py   Kaggle Pascal-VOC XML -> YOLO labels, train/val/test split
 train.py             fine-tune YOLO26n as the head model
 dump_crops.py        rider crops from videos, pre-labelled
@@ -66,7 +69,8 @@ data/ models/ runs/ outputs/   local only (git-ignored): videos, datasets, weigh
 | | |
 |---|---|
 | Head model v1 (Kaggle data only), held-out test images | mAP50 0.89 (helmet 0.91, no_helmet 0.87) |
-| Full pipeline on 7 stock traffic clips, violations checked by eye | 17 reported, 8 correct |
+| Pipeline with head model only, 7 stock traffic clips, checked by eye | 17 reported, 8 correct |
+| Pipeline + YOLOE second opinion + one-bike-per-head, same clips | 5 reported, 4 correct (no triple riding in these clips; a few real cases are now missed; tuned on these same clips, so optimistic) |
 
 Main failure: v1 has never seen helmets **from behind**, so dark rear-view helmets get called "no helmet".
 v2 adds 107 auto-labelled rider crops from Indian traffic (mostly rear views).
