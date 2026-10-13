@@ -90,3 +90,19 @@ def claim_heads(bikes, candidates, max_off=0.4, min_size=0.12):
         if offs[i] <= max_off and (h[2] - h[0]) >= min_size * (bikes[i][2] - bikes[i][0]):
             mine[i].append(h)
     return mine
+
+
+def bare_from_persons(result, heads, dx=0, dy=0, min_conf=0.6):
+    """Bare heads our head model can't see (mostly riders seen from behind): a person with NO head or helmet box
+    anywhere near the top of their body. Needs YOLOE to have found every real helmet first, otherwise it would
+    accuse everybody. Returns synthetic 'no_helmet' heads, one per such person."""
+    H, W = result.orig_shape[:2]
+    out = []
+    for (x1, y1, x2, y2), conf in zip(result.boxes.xyxy.tolist(), result.boxes.conf.tolist()):
+        h = y2 - y1
+        if conf < min_conf or y1 < 0.02 * H or h < 0.25 * H or x1 < 0.02 * W or x2 > 0.98 * W:
+            continue                      # unsure, tiny, or cut off by the crop edge (a pedestrian beside the bike)
+        zone = (x1 + dx + 0.2 * (x2 - x1), y1 + dy - 0.05 * h, x2 + dx - 0.2 * (x2 - x1), y1 + dy + 0.3 * h)
+        if not any(overlaps(zone, k) for k in heads):
+            out.append((*zone, 1, conf))
+    return out

@@ -14,6 +14,7 @@ video ─► YOLO26n (COCO) + ByteTrack ─► every vehicle gets an ID; keep th
            ▼ for each motorcycle: cut out the region above it (its riders)
        head model (ours, fine-tuned YOLO26n) ─► heads, each "helmet" or "no_helmet"
        YOLOE ("helmet" prompt, zero-shot)     ─► second opinion: dark rear-view helmets our model misses
+       person detector (COCO)                 ─► a rider with no helmet/head box on top = bare head seen from behind
            │
            ▼ every head is given to ONE bike (neighbouring crops overlap), then remember per bike, frame after frame: how many heads, any confident bare head?
        vote once per bike (ignore bikes seen too briefly or parked)
@@ -84,6 +85,7 @@ data/ models/ runs/ outputs/   local only (git-ignored): videos, datasets, weigh
 | Head model v1 (Kaggle data only), held-out test images | mAP50 0.89 (helmet 0.91, no_helmet 0.87) |
 | Pipeline with head model only, 7 stock traffic clips, checked by eye | 17 reported, 8 correct |
 | Pipeline + YOLOE second opinion + one-bike-per-head, same clips | 5 reported, 4 correct (no triple riding in these clips; a few real cases are now missed; tuned on these same clips, so optimistic) |
+| + bare riders seen from behind (person with no helmet found by YOLOE), same clips | 9 reported, about 7 look correct by eye |
 
 Main failure: v1 has never seen helmets **from behind**, so dark rear-view helmets get called "no helmet".
 v2 adds 107 auto-labelled rider crops from Indian traffic (mostly rear views).

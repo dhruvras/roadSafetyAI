@@ -15,7 +15,7 @@ import cv2
 import imageio_ffmpeg
 from ultralytics import YOLO
 
-from common import (BIKE_MODEL, HEAD_MODEL, MOTORCYCLE, VEHICLES, add_yoloe_helmets, claim_heads, heads_from, load_yoloe, pick_device,
+from common import (BIKE_MODEL, HEAD_MODEL, MOTORCYCLE, VEHICLES, add_yoloe_helmets, bare_from_persons, claim_heads, heads_from, load_yoloe, pick_device,
                     rider_region)
 
 BIKE_CONF, HEAD_CONF = 0.35, 0.40
@@ -87,6 +87,7 @@ def analyse(video, bike_model, head_model, yoloe, device, show=True, progress=No
     raw = out_dir / "annotated_raw.mp4"
     writer = cv2.VideoWriter(str(raw), cv2.VideoWriter_fourcc(*"mp4v"), fps / STRIDE, (W, H))
     bike_model.predictor = None               # fresh tracker for every video, so IDs start again at 1
+    person_model = YOLO(BIKE_MODEL) if yoloe else None     # its own copy: predicting with the tracking model would reset the tracker
 
     live, finished = {}, []
     frame_no = analysed = 0
@@ -127,6 +128,8 @@ def analyse(video, bike_model, head_model, yoloe, device, show=True, progress=No
         found = [heads_from(hr, rx, ry) for hr, (rx, ry, _, _) in zip(head_results, regions)]
         if yoloe:
             found = [add_yoloe_helmets(hs, er, rx, ry) for hs, er, (rx, ry, _, _) in zip(found, helmet_results, regions)]
+            people = person_model.predict(crops, classes=[0], conf=0.5, device=device, verbose=False) if crops else []
+            found = [hs + bare_from_persons(pr, hs, rx, ry) for hs, pr, (rx, ry, _, _) in zip(found, people, regions)]
         owned = claim_heads([box for _, box in bikes], found)
 
         for (track_id, bike), (rx, ry, _, _), crop, heads in zip(bikes, regions, crops, owned):
