@@ -14,3 +14,6 @@ outputs/
 
 # college paperwork (synopsis etc.)
 docs/
+
+frontend/node_modules/
+frontend/dist/

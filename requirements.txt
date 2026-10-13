@@ -2,4 +2,6 @@ ultralytics>=8.4      # YOLO26 + YOLOE + ByteTrack (pulls in torch, opencv, nump
 lap>=0.5.12           # ByteTrack's assignment solver
 imageio-ffmpeg        # bundled ffmpeg: re-encodes output video to browser-playable H.264
 clip @ git+https://github.com/ultralytics/CLIP.git   # YOLOE's text prompt ("helmet")
-streamlit>=1.40      # the dashboard (app.py)
+fastapi>=0.115       # the web API (backend/main.py)
+uvicorn[standard]    # runs it
+python-multipart     # video uploads

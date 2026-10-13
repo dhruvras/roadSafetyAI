@@ -40,7 +40,8 @@ not in git; you can retrain the model yourself (below).
 
 | Step | Command |
 |---|---|
-| Dashboard (upload / pick a video, see violations + evidence) | `streamlit run app.py` |
+| Website: API (terminal 1, from the project root) | `uvicorn backend.main:app --port 8000` |
+| Website: frontend (terminal 2) | `cd frontend && npm install && npm run dev`, then open http://localhost:5173 |
 | Detect violations in videos | `python detect_violations.py data/clips/*.mp4` (add `--model models/helmet_v2.pt`, `--no-show`, `--no-yoloe`) |
 | Build the training set from the Kaggle dataset | `python prepare_dataset.py` (expects `data/kaggle_helmet/{images,annotations}`) |
 | Train a head model | `python train.py data/helmet_v1/data.yaml helmet_v1` |
@@ -48,12 +49,24 @@ not in git; you can retrain the model yourself (below).
 | Auto-label the crops (YOLOE + v1 + person check) | `python auto_label.py` |
 | Fix crops by hand | `python label_tool.py` or `python label_tool.py --review` |
 
+## Website
+
+```
+browser (React) ──upload──► FastAPI ──queue──► one worker thread runs detect_violations.analyse()
+       ▲                       │                          │ writes outputs/<job id>/ (video, csv, evidence)
+       └──── polls progress ◄──┘◄─────────────────────────┘
+```
+
+`POST /api/jobs` stores the video and returns a job id; the page polls `GET /api/jobs/<id>` every second for
+progress and, when done, the violations with links to the annotated video and evidence photos (`/files/...`).
+
 ## Folder layout
 
 ```
 common.py            shared settings + helpers (device, rider region, IoU, head parsing, YOLOE check)
 detect_violations.py the full pipeline
-app.py               Streamlit dashboard around the pipeline
+backend/main.py      FastAPI: upload a video, analyse it in the background, serve results
+frontend/            React (Vite) website: upload, progress, annotated video, violations, evidence
 prepare_dataset.py   Kaggle Pascal-VOC XML -> YOLO labels, train/val/test split
 train.py             fine-tune YOLO26n as the head model
 dump_crops.py        rider crops from videos, pre-labelled
