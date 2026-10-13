@@ -1,0 +1,11 @@
+.venv
+.git
+__pycache__
+node_modules
+frontend
+docs
+data
+outputs
+runs
+weights
+models
